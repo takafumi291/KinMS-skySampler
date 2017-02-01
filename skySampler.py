@@ -4,12 +4,13 @@ Copyright (C) 2017, Mark D. Smith
 E-mail: mark.smith -at- physics.ox.ac.uk
 
 Updated versions of the software are available through github:
-https://github.com/TimothyADavis/KinMSpy
- 
-If you have found this software useful for your research,
-I would appreciate an acknowledgment to the use of the
-"KINematic Molecular Simulation (KinMS) routines of Davis et al., (2013)".
-[MNRAS, Volume 429, Issue 1, p.534-555]
+https://github.com/Mark-D-Smith/KinMS-skySampler
+
+This is a plugin for KinMS, please note the following from that code:
+  If you have found this software useful for your research,
+  I would appreciate an acknowledgment to the use of the
+  "KINematic Molecular Simulation (KinMS) routines of Davis et al., (2013)".
+  [MNRAS, Volume 429, Issue 1, p.534-555]
 
 This software is provided as is without any warranty whatsoever.
 For details of permissions granted please see LICENCE.md
