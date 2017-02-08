@@ -27,7 +27,7 @@ print 'Sampling the sky took: ' + str(t2-t1) + ' seconds.'
 print clouds
 #Plot resultant distribution
 velRad = np.arange(0,100,0.1)
-f = KinMS(10,10,31,0.1,0.1,[0.01,0.01,0],30, posAng = 60, sbMode = 'skyProfile', sbProf = list, samplerMode = 'mom0', velRad = velRad,velProf = velRad ** 0.5, cleanOut = True, fileName = 'testCube.fits', gasSigma = 1)
+f = KinMS(10,10,31,0.1,0.1,[0.01,0.01,0],30, posAng = 60, inClouds = clouds[:,0:3], flux_clouds = clouds[:,3], sbMode = 'skyProfile', sbProf = list, samplerMode = 'mom0', velRad = velRad,velProf = velRad ** 0.5, cleanOut = True, fileName = 'testCube.fits', gasSigma = 1)
 
 t3 = time.time()
 print 'Making KinMS cube took: ' + str(t3-t2) + ' seconds.'
@@ -38,7 +38,7 @@ ax1=fig.add_subplot(121, aspect = 'equal')
 ax2=fig.add_subplot(122, aspect = 'equal')
 plt.subplot(121, aspect = 'equal')
 plt.title('Observed sb distribution')
-CS = plt.contourf(np.arange(0,list.shape[0]),np.arange(0,list.shape[1]),list.sum(axis=2), cmap = "YlOrBr")
+CS = plt.contourf(np.arange(0,list.shape[0]),np.arange(0,list.shape[1]),list, cmap = "YlOrBr")
 plt.colorbar()
 plt.subplot(122, aspect = 'equal')
 plt.title('Simulated sb distribution')
