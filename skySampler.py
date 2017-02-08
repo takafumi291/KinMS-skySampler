@@ -7,10 +7,10 @@ Updated versions of the software are available through github:
 https://github.com/Mark-D-Smith/KinMS-skySampler
 
 This is a plugin for KinMS, please note the following from that code:
-  If you have found this software useful for your research,
-  I would appreciate an acknowledgment to the use of the
-  "KINematic Molecular Simulation (KinMS) routines of Davis et al., (2013)".
-  [MNRAS, Volume 429, Issue 1, p.534-555]
+    If you have found this software useful for your research,
+    I would appreciate an acknowledgment to the use of the
+    "KINematic Molecular Simulation (KinMS) routines of Davis et al., (2013)".
+    [MNRAS, Volume 429, Issue 1, p.534-555]
 
 This software is provided as is without any warranty whatsoever.
 For details of permissions granted please see LICENCE.md
@@ -19,7 +19,8 @@ For details of permissions granted please see LICENCE.md
 
 import numpy as np
 
-def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 20, maxCloudComponents = 0, cloudCap = 3000000, cellSize = 1., sbMode = 'list'):
+
+def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 20, maxCloudComponents = 0, cloudCap = 3000000, cellSize = 1., sbMode = 'list', clipLevel = 0.):
     """
     
     A function to produce clouds modelling an arbitrary sky distribution. 
@@ -59,6 +60,9 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     
     cellSize : float, optional
         Sets the number of arcseconds per pixel in making the conversion from pixel units to arcseconds
+        
+    clipLevel : float, optional
+        Set to require the program to clip the noise at the specified level.
     
     Returns
     -------
@@ -69,8 +73,6 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     """
     
     
-    
-    print '+++ Generating clouds from ' + sbMode
     #Step 1: Convert Cube ==> Moment 0 ==> List
     if sbMode == 'cube':
         #Project to get a moment 0
@@ -78,24 +80,35 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     
     if ((sbMode == 'cube') | (sbMode == 'mom0')):
         #Convert into a list of clouds
-        cent = [sb.shape[0]/2 + phaseCentre[0],sb.shape[1]/2 + phaseCentre[1]]
+        cent = [sb.shape[0]/2 + phaseCentre[0]/cellSize,sb.shape[1]/2 + phaseCentre[1]/cellSize]
         sbList = np.zeros([1,3])
         for i in range(0,sb.shape[0]):
             for j in range(0,sb.shape[1]):
                 newCloud = np.array([[i,j,sb[i,j]]])
+                
                 sbList = np.append(sbList,newCloud,axis=0)
         sb=sbList[1:,:]
+    #Clip the noise at the specified level
+    if clipLevel:
+        keepCount = np.sum(i > clipLevel for i in sb[:,2])
+        sbKept = np.zeros([keepCount,3])
+        j=0
+        for i in range(0,sb.shape[0]):
+            if sb[i,2] > clipLevel:
+                sbKept[j,:] = sb[i,:]
+                j = j + 1
+    sb=sbKept
     
+    
+    inFlux = sb[:,2].sum()
     #Now we know we have a list of clouds [x,y,I] in the sky plane
+    
     #Step 2: Slice each list element into multiple cloudlets to allow for velDisp and diskThick
-    print '+++ Subdividing all clouds +++'
     
     
     #Find minimum non-zero value for intensity - divide this by the cloudResolution to get the approximate standard intensity of a single new cloud
     min = np.nanmin(np.where(sb[:,2]>0,sb[:,2],float('Inf')))
-    print '++++ The minimum non-zero flux for any component is: ' + str(min)
     cloudI = min/cloudResolution
-    print '++++ SubCloud Intensity =' + str(cloudI)
     
     
     # Create a new list of clouds that have this intensity
@@ -110,36 +123,21 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
         clouds2Use = np.floor( clouds2Use * cloudCap / np.sum(clouds2Use))
     
     #Initialise an array of length to contain all these clouds
-    clouds = np.zeros([np.sum(clouds2Use),4])
+    clouds = np.zeros([int(np.sum(clouds2Use)),4])
     j=0
+    sbNew = np.zeros([int(sb.shape[0])])
     for i in range(0,clouds2Use.shape[0]):
         cloudCounter = clouds2Use[i]
         while cloudCounter > 0:
-            newCloud=np.array([[(sb[i,0]-cent[0])*cellSize,(sb[i,1]-cent[1])*cellSize,0*cellSize,cloudI/clouds2Use[i]]])
+            newCloud=np.array([[(sb[i,0]-cent[0])*cellSize,(sb[i,1]-cent[1])*cellSize,0*cellSize,sb[i,2]/clouds2Use[i]]])
             clouds[j,:]=newCloud
             j=j+1
             cloudCounter = cloudCounter - 1
-    print '++++Using ' + str(clouds.shape[0]) + ' sub-clouds to represent this distribution++++'
+    outFlux = clouds[:,3].sum()
     
-    #Step 3: Deproject using inclination to get a galaxy-plane value
-    print '+++Deprojecting from sky-plane to galactic plane+++'
-    #Currently assumes thin disc - so z'=0
-    c=np.cos(np.radians(inc))
-    clouds[:,1]=clouds[:,1]/c
+    if (inFlux-outFlux > (inFlux*1e-8)):
+        print('WARNING: Flux may not have been conserved',inFlux,outFlux)
     
-    
-    
-    #Step 4: Derotate by the position angle to correct for a later KinMS rotation
-    print '+++De-rotating to correct for KinMS later rotation+++'
-    ang2rot = np.radians(90-posAng)
-    c = np.cos(ang2rot)
-    s = np.sin(ang2rot)
-    oldClouds = clouds
-    clouds[:,0] = c*oldClouds[:,0] - s * oldClouds[:,1]
-    clouds[:,1] = s*oldClouds[:,0] + c * oldClouds[:,1]
-        
-    
-     
-    
+    retClouds = clouds
     #Step 5: Output list of new values
-    return clouds
+    return retClouds
