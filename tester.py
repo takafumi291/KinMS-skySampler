@@ -4,7 +4,6 @@ from skySampler import *
 import matplotlib.pyplot as plt
 from KinMS import *
 import numpy as np
-from makeplots import makeplots
 import time
 
 #make list of clouds
@@ -33,5 +32,16 @@ f = KinMS(10,10,31,0.1,0.1,[0.01,0.01,0],30, posAng = 60, sbMode = 'skyProfile',
 t3 = time.time()
 print 'Making KinMS cube took: ' + str(t3-t2) + ' seconds.'
 
-makeplots(f,100,100,101,0.1,0.1,[0.01,0.01,0],posang = 60)
 
+fig = plt.figure()
+ax1=fig.add_subplot(121, aspect = 'equal')
+ax2=fig.add_subplot(122, aspect = 'equal')
+plt.subplot(121, aspect = 'equal')
+plt.title('Observed sb distribution')
+CS = plt.contourf(np.arange(0,list.shape[0]),np.arange(0,list.shape[1]),list.sum(axis=2), cmap = "YlOrBr")
+plt.colorbar()
+plt.subplot(122, aspect = 'equal')
+plt.title('Simulated sb distribution')
+CS = plt.contourf(np.arange(0,f.shape[0]),np.arange(0,f.shape[1]),f.sum(axis=2), cmap = "YlOrBr")
+plt.colorbar()
+plt.show()
