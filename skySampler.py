@@ -20,7 +20,7 @@ For details of permissions granted please see LICENCE.md
 import numpy as np
 
 
-def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 20, maxCloudComponents = 0, cloudCap = 3000000, cellSize = 1., sbMode = 'list', clipLevel = 0.):
+def skySampler(sb, phaseCentre=np.array([0,0,0]),cloudResolution = 20, maxCloudComponents = 0, cloudCap = 3000000, cellSize = 1., sbMode = 'list', clipLevel = 0.,verbose=False):
     """
     
     A function to produce clouds modelling an arbitrary sky distribution. 
@@ -32,11 +32,7 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     
     sb : either list [x(px),y(px),I], Moment 0 map [[I,...,I],[],...,[]] or full datacube (e.g. a CASA .model file) - must be made of un-restored CLEAN components
     
-    inc : float
-        The kinematic inclination, currently must be single valued
-        
-    posAng : float
-        The Kinematic Position Angle, currently must be single valued
+
         
     phaseCentre : 2-vector describing the morphological centre of the profile relative to the centre pixel in units of px
 
@@ -78,9 +74,11 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
         #Project to get a moment 0
         sb=sb.sum(axis=2)
     
+    
+    
     if ((sbMode == 'cube') | (sbMode == 'mom0')):
         #Convert into a list of clouds
-        cent = [sb.shape[0]/2 + phaseCentre[0]/cellSize,sb.shape[1]/2 + phaseCentre[1]/cellSize]
+        cent = [sb.shape[0]/2. + phaseCentre[0]/cellSize,sb.shape[1]/2. + phaseCentre[1]/cellSize]
         sbList = np.zeros([1,3])
         for i in range(0,sb.shape[0]):
             for j in range(0,sb.shape[1]):
@@ -88,6 +86,7 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
                 
                 sbList = np.append(sbList,newCloud,axis=0)
         sb=sbList[1:,:]
+        if verbose: print ('Clouds listed have total flux', sb[:,2].sum())
     #Clip the noise at the specified level
     if clipLevel:
         keepCount = np.sum(i > clipLevel for i in sb[:,2])
@@ -97,7 +96,9 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
             if sb[i,2] > clipLevel:
                 sbKept[j,:] = sb[i,:]
                 j = j + 1
-    sb=sbKept
+        sb=sbKept
+        if verbose: print ('Components clipped leaving a flux of', sb[:,2].sum())
+    
     
     
     inFlux = sb[:,2].sum()
@@ -105,21 +106,26 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     
     #Step 2: Slice each list element into multiple cloudlets to allow for velDisp and diskThick
     
-    
     #Find minimum non-zero value for intensity - divide this by the cloudResolution to get the approximate standard intensity of a single new cloud
-    min = np.nanmin(np.where(sb[:,2]>0,sb[:,2],float('Inf')))
-    cloudI = min/cloudResolution
+    min = np.nanmin(np.where(sb[:,2]>0.,sb[:,2],float('Inf')))
+    cloudI = np.abs(min/cloudResolution)
     
+    
+    if verbose: print ('The unit cloud has a flux of: ',cloudI)
     
     # Create a new list of clouds that have this intensity
     sbNew = np.zeros([1,3])
-    #Work out how many clouds to use for each component
-    clouds2Use = np.where(maxCloudComponents * cloudI > sb[:,2], 
-        np.full(sb.shape[0],maxCloudComponents),
-        np.rint(sb[:,2]/cloudI))
-    
+    if maxCloudComponents:
+        #Work out how many clouds to use for each component
+        if verbose: print ('The brightest pixel represented is: ',maxCloudComponents * cloudI)
+        clouds2Use = np.where(maxCloudComponents * cloudI > sb[:,2], 
+            np.full(sb.shape[0],maxCloudComponents),
+            np.rint(np.abs(sb[:,2])/cloudI))
+    else: clouds2Use = np.rint(np.abs(sb[:,2])/cloudI)
+    if verbose: print ('I want to use ', clouds2Use.sum(), ' clouds.')
     #Limit the maximum number of clouds to cloudCap
-    if np.sum(clouds2Use) > cloudCap:
+    if np.sum(np.abs(clouds2Use)) > cloudCap:
+        if verbose: print ('Limiting to ', cloudCap, ' clouds')
         clouds2Use = np.floor( clouds2Use * cloudCap / np.sum(clouds2Use))
     
     #Initialise an array of length to contain all these clouds
@@ -129,11 +135,13 @@ def skySampler(sb, inc, posAng, phaseCentre=np.array([0,0,0]),cloudResolution = 
     for i in range(0,clouds2Use.shape[0]):
         cloudCounter = clouds2Use[i]
         while cloudCounter > 0:
-            newCloud=np.array([[(sb[i,0]-cent[0])*cellSize,(sb[i,1]-cent[1])*cellSize,0*cellSize,sb[i,2]/clouds2Use[i]]])
+            newCloud=np.array([[(sb[i,0]-cent[0]+0.5*np.random.uniform(low=-1.,high=1.))*cellSize,(sb[i,1]-cent[1]+0.5*np.random.uniform(low=-1.,high=1.))*cellSize,0*cellSize,sb[i,2]/clouds2Use[i]]])
             clouds[j,:]=newCloud
             j=j+1
             cloudCounter = cloudCounter - 1
     outFlux = clouds[:,3].sum()
+    
+    if verbose: print np.min(clouds[:,3])
     
     if (inFlux-outFlux > (inFlux*1e-8)):
         print('WARNING: Flux may not have been conserved',inFlux,outFlux)
