@@ -1,3 +1,4 @@
 # KinMS-skySampler
 A plugin for Tim Davis' Kinematic Molecular Simulator.
-This plugin takes a specified sky distribution and converts it into a well-sampled set of cloud positions in the galactic plane, which can be used for KinMS' inClouds mechanism. The input can be a list of positions and intensities (x,y,I), a planar projection of a cube (an array of size XxY containing the intensities along each line of sight) or a cube itself.
+This plugin takes a specified distribution - such as an interferometric data cube, and generates a set of samples that can be input to KinMS to model the data. 
+The samples can be drawn according to a uniform, intensity-weighted or custom scheme, and are converted to the plan of the galaxy using a separate routine, so that the sampling algorithm needs no knowledge of the inclination and position angle of the galaxy. This reduces execution time in e.g. an MCMC process.
