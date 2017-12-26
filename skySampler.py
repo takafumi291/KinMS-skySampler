@@ -1,151 +1,227 @@
-#KinMS Sample clouds from sky distribution
-"""
-Copyright (C) 2017, Mark D. Smith
-E-mail: mark.smith -at- physics.ox.ac.uk
+# Second build of SkySampler. This program now includes multiple routines - the main, most-costly,
+# sampling algorithm and the lightweight transformation program, which rotates the 
+# sky-coordinates of clouds to the galaxy plane
 
-Updated versions of the software are available through github:
-https://github.com/Mark-D-Smith/KinMS-skySampler
+# A typical calling order would be to supply the datacube or moment 0, then:
+#    clouds = sampleClouds(cube)
+#    clouds = transformClouds(clouds, posAng = posAng, inc = inc, cent = cent)
+#    clouds = sampleDisc(clouds, discThick, sbRad = rad)
+#    modelCube = KinMS(<Blah>, inClouds = clouds[:,0:3], flux_clouds = clouds[:,3])
 
-This is a plugin for KinMS, please note the following from that code:
-    If you have found this software useful for your research,
-    I would appreciate an acknowledgment to the use of the
-    "KINematic Molecular Simulation (KinMS) routines of Davis et al., (2013)".
-    [MNRAS, Volume 429, Issue 1, p.534-555]
+# Modifications:
+# v2. December 2017, MDS, Oxford
+# Testing and correction 25 December 2017, MDS, Horsham
+# Updated for Python 3 compatibility 26 December 2017, MDS, Horsham
 
-This software is provided as is without any warranty whatsoever.
-For details of permissions granted please see LICENCE.md
-"""
-
-
+import future
 import numpy as np
+from scipy import interpolate
+import time
 
+import KinMS
 
-def skySampler(sb, phaseCentre=np.array([0,0,0]),cloudResolution = 20, maxCloudComponents = 0, cloudCap = 3000000, cellSize = 1., sbMode = 'list', clipLevel = 0.,verbose=False):
+def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allow_undersample = False, verbose = True, debug = False):
     """
+    Given a 2d image or 3d cube, will generate coordinates for a point-source model of that image
     
-    A function to produce clouds modelling an arbitrary sky distribution. 
-    Takes inputs specifing the distribution and observed parameters.
-    Returns the list of clouds taken from this model.
-
-    Parameters
-    ----------
+    ================
+    Inputs:
     
-    sb : either list [x(px),y(px),I], Moment 0 map [[I,...,I],[],...,[]] or full datacube (e.g. a CASA .model file) - must be made of un-restored CLEAN components
+    sb: np.ndarray of 2 or 3 dimensions containing the astronomical data to be modelled. If 3D, the data will be summed along the third axis.
     
-
-        
-    phaseCentre : 2-vector describing the morphological centre of the profile relative to the centre pixel in units of px
-
-    Other Parameters
-    ----------------
+    cellSize: float arcsec/px The scale of each pixel, used to convert cloud positions in pixels to physical unity
     
-    sbMode : str, optional
-        Allows the user to select if a list ('list') of CLEAN components [x,y,I], a Moment 0 map ('mom0') or 
-        an observational cube ('cube') has been provided
+    nSamps: int The total number of point samples to draw from the distribution, where these are distributed weighted by the intensity.
     
-    cloudResolution: int, optional
-        Allows the user to specify the number of cloudlets that will be produced for the dimmest spaxel in the cube
-        computation time will scale with this value
+    sampFact: int If nSamps not specified, assume a uniform sampling of clouds, with this many per pixel
+               WARNING: For large images, this can lead to excessive slow-downs
     
-    maxCloudComponents: int, optional
-        Sets the maximum number of clouds that should be generated for a particularly bright component,
-        if set to 0 (as default), does not limit the maximum number of clouds
-        
-    cloudCap: int, optional
-        Sets the maximum number of clouds that the sampler is allowed to use
+    weighting: np.ndarray of 2 dimensions of same size as sb (or with same first dimensions). Used to weight the sampling by distributions other than intensity, eg. by velocity dispersion
     
-    cellSize : float, optional
-        Sets the number of arcseconds per pixel in making the conversion from pixel units to arcseconds
-        
-    clipLevel : float, optional
-        Set to require the program to clip the noise at the specified level.
+    allow_undersample: bool Default FALSE. Prevents using a small number of clouds to sample a large matrix. If the matrix is sparse, this can be disabled.
     
-    Returns
-    -------
+    ================
+    Outputs:
     
-    clouds : the list of cloud positions in the galaxy plane in the format [x("),y("),z("),I]
-        the KinMS inputs are then inClouds = clouds[:,0:3] and flux_clouds=clouds[:,3] 
+    clouds: An array of [x,y,I] values corresponding to particle positions relative to the cube centre
     
     """
     
     
-    #Step 1: Convert Cube ==> Moment 0 ==> List
-    if sbMode == 'cube':
-        #Project to get a moment 0
-        sb=sb.sum(axis=2)
+    assert len(sb.shape) == 2 or len(sb.shape) == 3, "The input array must be 2 or 3 dimensions"
+    
+    if len(sb.shape) == 3: sb = sb.sum(axis=2)
+    if not nSamps == 0 and allow_undersample == False: assert nSamps > sb.size, "There are insufficiently many clouds to sample the distribution. If this is a sparse array, use allow_undersample = True"
+    
+    inFlux = sb.sum()
+    
+    #Convert to a list of pixel values
+    cent = [sb.shape[0]/2, sb.shape[1]/2]
+    t0 = time.time()
+    coords = np.arange(-cent[0],cent[0]) * cellSize
+    delY,delX = np.meshgrid(coords,coords)     #Order for consistency with index order
+    
+    sbList = np.zeros((delX.flatten().shape[0],3))
+    sbList[:,0] = delX.flatten()
+    sbList[:,1] = delY.flatten()
+    sbList[:,2] = sb.flatten()
+    sb = sbList
+    t1 = time.time()
+    
+    #Calculate number of clouds to use per pixel. By default, weight uniformly, other modes are intensity-weighted (sampFact set, nSamps not) or custom weighting
+    #Priority: Custom, Intensity, Uniform
+    if nSamps: 
+        if not weighting:
+            scheme = 'Intensity-weighted'
+            weighting = sb[:,2]
+        else: 
+            scheme = 'custom weighting'
+            weighting = weighting.flatten()
+        intWeight = weighting.sum()
+        iCloud = intWeight/nSamps
+        nClouds = np.floor(weighting/iCloud)
+        
+    else: 
+        scheme = 'uniform'
+        nClouds = np.full(sb[:,2].shape,sampFact)
+    if verbose: print('Using a ',scheme,' scheme to sample with ',nClouds.sum(),' clouds.')
+    
+    # Generate the final list of all clouds
+    clouds = np.zeros([int(nClouds.sum()),4])
+    k=0
+    for i in np.arange(0,sb.shape[0]):
+        for j in np.arange(0,nClouds[i]):
+            if not nClouds[i] == 0:
+                clouds[k,:] = np.array([[sb[i,0]+0.5*np.random.uniform(low=-1.,high=1.),sb[i,1]+0.5*np.random.uniform(low=-1.,high=1.),0.,sb[i,2]/nClouds[i]]])
+                k = k + 1
+    t2=time.time()
+    if debug:
+        print('    Generating pixel positions: ',t1-t0)
+        print('    Listing all sub-clouds: ',t2-t1)
+    #Sanity checking:
+    if not (clouds[:,3].sum() - inFlux) < 1e-3: print('Flux not conserved: '+str(100*(clouds[:,3].sum()-inFlux)/inFlux)+'%')
+    #print(clouds)
+    return clouds
+
+def transformClouds(clouds, posAng = 90., inc = 0., cent = [0.,0.]):
+    """
+    Calculate the galaxy co-ordinates of clouds from the sky plane. This MUST be used if any of the following conditions are true:
+    inc != 0
+    posAng != 90
+    cent != [0,0]
+    
+    This exists as a stand-alone routine since an MCMC fit to the galaxy will likely need to run this every step, 
+    and the sampleClouds routine is computationally expensive
+    ============
+    Inputs:
+    
+    clouds: np.ndarray The output of the sampleClouds array [x,y,I]
+    
+    posAng: 0=<float<360 The position angle of the galaxy major axis, measured from the y-axis of the cube
+    
+    inc: 0=<float<90 The inclination of the galaxy, with 90 being edge-on
+    
+    cent: [float,float] The photometric centre of the galaxy relative to the centre of the cube
+    
+    ============
+    Outputs:
+    
+    clouds: np.ndarray Positions and intensities of particles [x',y',I]
+    """
+    clouds[:,0:2] = np.array([clouds[:,0] - cent[0],clouds[:,1] - cent[1]]).T
+    posAng = np.radians(90-posAng)
+    xNew = np.cos(posAng) * clouds[:,0] - np.sin(posAng) * clouds[:,1]
+    yNew = np.sin(posAng) * clouds[:,0] + np.cos(posAng) * clouds[:,1]
+    yNew = yNew / np.cos(np.radians(inc))
+    
+    clouds[:,0] = xNew
+    clouds[:,1] = yNew
+    
+    return clouds
+    
+def sampleDisc(clouds, discThick, sbRad = 0.):
+    """
+    Generate z-axis co-ordinates for particles according to a disc model
+    Assumes the galaxy is only weakly triaxial - A,B >> C, but relaxes thin-disc approximation
+    
+    For strong triaxiality, we would need to include scale height to calculate [x,y,z] from the spaxel [x,y]
+    
+    ============
+    Inputs:
+    
+    clouds: np.ndarray [x',y',0.,I] output from the rotate clouds routine - which has made thin disc approximation
+    
+    discThick: float        A constant scale height for the disc
+               np.ndarray   The scale height of the disc at radial positions given by sbRad
+    
+    sbRad (Optional): np.ndarray The radial positions at which discThick is evaluated.
+    
+    ============
+    Outputs:
+    
+    height: np.ndarray of [z'] co-ordinates
+    """
+    if isinstance(discThick, (list, tuple, np.ndarray)) or sbRad:
+        assert discThick.shape == sbRad.shape, "Disc thickness values and radii dimensions do not match"
+    
+    rad = np.sqrt(clouds[:,0] ** 2 + clouds[:,1] ** 2)   #radius of each cloud from centre
+    if isinstance(discThick, (list, tuple, np.ndarray)):
+        interpfunc2 = interpolate.interp1d(sbRad,discThick,kind='linear')
+        discThick_here = interpfunc2(rad)
+    else:
+        discThick_here = discThick
+    
+    clouds[:,2] = discThick_here * np.random.uniform(-1,1,clouds.shape[0])
+    return clouds
+
+
+def test_skySampler():
+    import matplotlib.pyplot as plt
+    inc = 75.
+    posAng = 240.
+    cent = np.array([0.,25.])
+    
+    cellSize = 0.5
+    
+    discThick = 0.
+    
+    rad = np.arange(0.,500.)
+    
+    nSamps = int(1e6)
+    
+    # xs, ys, vs, dx,dv,beam,i,
+    t0 = time.time()
+    model = KinMS.KinMS(100.,100.,100.,cellSize,5.,[1.,1.,0],inc, sbProf=np.where(rad<50.,1.,0.),sbRad=rad,velRad=rad,velProf=rad * 0.,diskThick=discThick,cleanOut=True,
+    nSamps=nSamps,posAng=posAng,phaseCen=cent,fileName = 'TestModel.fits')
+    t1 = time.time()
+    print('Making initial model: ', t1-t0)
+    clouds = sampleClouds(model, cellSize, nSamps=nSamps)
+    t2 = time.time()
+    print('Sampling clouds: ', t2-t1)
+    clouds = transformClouds(clouds, cent = cent, inc = inc, posAng = posAng)
+    t3 = time.time()
+    print('De-rotating clouds ',t3-t2)
+    #clouds = sampleDisc(clouds, discThick)
+    #print(clouds.shape)
+    newMod = KinMS.KinMS(100.,100.,100.,cellSize,5.,[2.,2.,0],inc, velRad=rad,velProf=rad*0.,diskThick=discThick,cleanOut=True,posAng=posAng,phaseCen=cent,
+    inClouds = clouds[:,0:3], flux_clouds = clouds[:,3], fileName = 'SSModel.fits')
+    t4 = time.time()
+    print('Making final model ',t4-t3)
     
     
+    fig = plt.figure()
+    ax1 = fig.add_subplot(121,aspect='equal')
+    ax2 = fig.add_subplot(122,aspect='equal')
     
-    if ((sbMode == 'cube') | (sbMode == 'mom0')):
-        #Convert into a list of clouds
-        cent = [sb.shape[0]/2. + phaseCentre[0]/cellSize,sb.shape[1]/2. + phaseCentre[1]/cellSize]
-        sbList = np.zeros([1,3])
-        for i in range(0,sb.shape[0]):
-            for j in range(0,sb.shape[1]):
-                newCloud = np.array([[i,j,sb[i,j]]])
-                
-                sbList = np.append(sbList,newCloud,axis=0)
-        sb=sbList[1:,:]
-        if verbose: print ('Clouds listed have total flux', sb[:,2].sum())
-    #Clip the noise at the specified level
-    if clipLevel:
-        keepCount = np.sum(i > clipLevel for i in sb[:,2])
-        sbKept = np.zeros([keepCount,3])
-        j=0
-        for i in range(0,sb.shape[0]):
-            if sb[i,2] > clipLevel:
-                sbKept[j,:] = sb[i,:]
-                j = j + 1
-        sb=sbKept
-        if verbose: print ('Components clipped leaving a flux of', sb[:,2].sum())
+    Xax = np.arange(-cellSize * model.shape[0]/2, cellSize * model.shape[0]/2, cellSize)
+    Yax = np.arange(-cellSize * model.shape[1]/2, cellSize * model.shape[1]/2, cellSize)
     
+    levs = np.arange(0,0.0005,0.0001)
+    ax1.contourf(Xax,Yax,model.sum(axis=2),cmap="YlOrBr",levels=levs)
+    ax1.set_title('Original')
+    ax2.contourf(Xax,Yax,newMod.sum(axis=2),cmap="YlOrBr",levels=levs)
+    ax2.set_title('SkySampler')
     
-    
-    inFlux = sb[:,2].sum()
-    #Now we know we have a list of clouds [x,y,I] in the sky plane
-    
-    #Step 2: Slice each list element into multiple cloudlets to allow for velDisp and diskThick
-    
-    #Find minimum non-zero value for intensity - divide this by the cloudResolution to get the approximate standard intensity of a single new cloud
-    min = np.nanmin(np.where(sb[:,2]>0.,sb[:,2],float('Inf')))
-    cloudI = np.abs(min/cloudResolution)
-    
-    
-    if verbose: print ('The unit cloud has a flux of: ',cloudI)
-    
-    # Create a new list of clouds that have this intensity
-    sbNew = np.zeros([1,3])
-    if maxCloudComponents:
-        #Work out how many clouds to use for each component
-        if verbose: print ('The brightest pixel represented is: ',maxCloudComponents * cloudI)
-        clouds2Use = np.where(maxCloudComponents * cloudI > sb[:,2], 
-            np.full(sb.shape[0],maxCloudComponents),
-            np.rint(np.abs(sb[:,2])/cloudI))
-    else: clouds2Use = np.rint(np.abs(sb[:,2])/cloudI)
-    if verbose: print ('I want to use ', clouds2Use.sum(), ' clouds.')
-    #Limit the maximum number of clouds to cloudCap
-    if np.sum(np.abs(clouds2Use)) > cloudCap:
-        if verbose: print ('Limiting to ', cloudCap, ' clouds')
-        clouds2Use = np.floor( clouds2Use * cloudCap / np.sum(clouds2Use))
-    
-    #Initialise an array of length to contain all these clouds
-    clouds = np.zeros([int(np.sum(clouds2Use)),4])
-    j=0
-    sbNew = np.zeros([int(sb.shape[0])])
-    for i in range(0,clouds2Use.shape[0]):
-        cloudCounter = clouds2Use[i]
-        while cloudCounter > 0:
-            newCloud=np.array([[(sb[i,0]-cent[0]+0.5*np.random.uniform(low=-1.,high=1.))*cellSize,(sb[i,1]-cent[1]+0.5*np.random.uniform(low=-1.,high=1.))*cellSize,0*cellSize,sb[i,2]/clouds2Use[i]]])
-            clouds[j,:]=newCloud
-            j=j+1
-            cloudCounter = cloudCounter - 1
-    outFlux = clouds[:,3].sum()
-    
-    if verbose: print np.min(clouds[:,3])
-    
-    if (inFlux-outFlux > (inFlux*1e-8)):
-        print('WARNING: Flux may not have been conserved',inFlux,outFlux)
-    
-    retClouds = clouds
-    #Step 5: Output list of new values
-    return retClouds
+    plt.show()
+
+test_skySampler()
