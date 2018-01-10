@@ -17,6 +17,7 @@ import future
 import numpy as np
 from scipy import interpolate
 import time
+from copy import copy
 
 import KinMS
 
@@ -103,7 +104,7 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
     #print(clouds)
     return clouds
 
-def transformClouds(clouds, posAng = 90., inc = 0., cent = [0.,0.]):
+def transformClouds(inclouds, posAng = 90., inc = 0., cent = [0.,0.]):
     """
     Calculate the galaxy co-ordinates of clouds from the sky plane. This MUST be used if any of the following conditions are true:
     inc != 0
@@ -128,6 +129,7 @@ def transformClouds(clouds, posAng = 90., inc = 0., cent = [0.,0.]):
     
     clouds: np.ndarray Positions and intensities of particles [x',y',I]
     """
+    clouds = copy(inclouds)
     clouds[:,0:2] = np.array([clouds[:,0] - cent[0],clouds[:,1] - cent[1]]).T
     posAng = np.radians(90-posAng)
     xNew = np.cos(posAng) * clouds[:,0] - np.sin(posAng) * clouds[:,1]
