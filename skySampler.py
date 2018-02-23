@@ -78,6 +78,7 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
         else: 
             scheme = 'custom weighting'
             weighting = weighting.flatten()
+        weighting=np.abs(weighting)
         intWeight = weighting.sum()
         iCloud = intWeight/nSamps
         nClouds = np.floor(weighting/iCloud)
