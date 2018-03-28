@@ -13,7 +13,7 @@
 # Testing and correction 25 December 2017, MDS, Horsham
 # Updated for Python 3 compatibility 26 December 2017, MDS, Horsham
 
-import future
+import __future__
 import numpy as np
 from scipy import interpolate
 import time
@@ -72,7 +72,7 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
     #Calculate number of clouds to use per pixel. By default, weight uniformly, other modes are intensity-weighted (sampFact set, nSamps not) or custom weighting
     #Priority: Custom, Intensity, Uniform
     if nSamps: 
-        if not weighting:
+        if not np.any(weighting):
             scheme = 'Intensity-weighted'
             weighting = sb[:,2]
         else: 
@@ -91,10 +91,13 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
     # Generate the final list of all clouds
     clouds = np.zeros([int(nClouds.sum()),4])
     k=0
+    
+    pixSmoothing = 0.5*cellSize              #Smooth cloud positions to within a cell, rather than gridded to the centre of that cell
     for i in np.arange(0,sb.shape[0]):
-        for j in np.arange(0,nClouds[i]):
-            if not nClouds[i] == 0:
-                clouds[k,:] = np.array([[sb[i,0]+0.5*np.random.uniform(low=-1.,high=1.),sb[i,1]+0.5*np.random.uniform(low=-1.,high=1.),0.,sb[i,2]/nClouds[i]]])
+        if not nClouds[i] == 0:
+            for j in np.arange(0,nClouds[i]):
+                #print i,j,nClouds[i],k
+                clouds[k,:] = np.array([[sb[i,0]+pixSmoothing*np.random.uniform(low=-1.,high=1.),sb[i,1]+pixSmoothing*np.random.uniform(low=-1.,high=1.),0.,sb[i,2]/nClouds[i]]])
                 k = k + 1
     t2=time.time()
     if debug:
