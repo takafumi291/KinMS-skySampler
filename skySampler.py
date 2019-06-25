@@ -12,6 +12,7 @@
 # v2. December 2017, MDS, Oxford
 # Testing and correction 25 December 2017, MDS, Horsham
 # Updated for Python 3 compatibility 26 December 2017, MDS, Horsham
+# Bug fixing for odd dimensioned cubes, added temprorary assertion to require square inputs, 25 June 2019, MDS, Oxford
 
 import __future__
 import numpy as np
@@ -52,6 +53,8 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
     assert len(sb.shape) == 2 or len(sb.shape) == 3, "The input array must be 2 or 3 dimensions"
     
     if len(sb.shape) == 3: sb = sb.sum(axis=2)
+    assert sb.shape[0] == sb.shape[1], "Currently, correct gridding is only handled for square matrices"
+
     if not nSamps == 0 and allow_undersample == False: assert nSamps > sb.size, "There are insufficiently many clouds to sample the distribution. If this is a sparse array, use allow_undersample = True"
     
     inFlux = sb.sum()
@@ -59,7 +62,11 @@ def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allo
     #Convert to a list of pixel values
     cent = [sb.shape[0]/2, sb.shape[1]/2]
     t0 = time.time()
-    coords = np.arange(-cent[0],cent[0]) * cellSize
+    #Handle odd and even arrays
+    if sb.shape[0] % 2 == 0:
+        coords = np.arange(-cent[0],cent[0]) * cellSize
+    elif sb.shape[0] % 2 == 1:
+        coords = np.arange(-cent[0],cent[0]+1) * cellSize
     delY,delX = np.meshgrid(coords,coords)     #Order for consistency with index order
     
     sbList = np.zeros((delX.flatten().shape[0],3))
