@@ -20,7 +20,7 @@ from scipy import interpolate
 import time
 from copy import copy
 
-import KinMS
+#import KinMS
 
 def sampleClouds(sb, cellSize, nSamps = 0, sampFact = 20, weighting = None, allow_undersample = False, verbose = True, debug = False):
     """
